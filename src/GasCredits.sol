@@ -41,11 +41,13 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         INITIAL_CHAIN_ID = block.chainid;
     }
 
+    // mint $GAS by depositing ETH 1:1
     function mint() public payable {
         entryPoint.depositTo{value: msg.value}(address(this));
         _mint(_msgSender(), msg.value);
     }
 
+    // validate sponsors have sufficient $GAS and valid signatures
     function validatePaymasterUserOp(UserOperation calldata userOp, bytes32, uint256 maxCost)
         external
         returns (bytes memory context, uint256 validationData)
@@ -53,10 +55,10 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         if (msg.sender != address(entryPoint)) SenderNotEntrypoint();
 
         GasPermit memory permit = parsePaymasterAndData(userOp.paymasterAndData);
-        bool sigFailed = false;
         if (balanceOf(permit.sponsor) < maxCost + GAS_OVERHEAD * userOp.maxFeePerGas) {
             revert InsufficientGasCredits();
         }
+        bool sigFailed;
         if (permit.sponsor != userOp.sender) {
             // use nonce, reverts if already used
             _useNonce(permit.sponsor, permit.nonce);
@@ -69,6 +71,7 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         return (abi.encode(permit.sponsor), _packValidationData(sigFailed, permit.validUntil, permit.validAfter));
     }
 
+    // burn $GAS that was consumed by this UserOp
     function postOp(PostOpMode, bytes calldata context, uint256 actualGasCost) external {
         if (msg.sender != address(entryPoint)) SenderNotEntrypoint();
 
@@ -109,12 +112,30 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         USER OP
     =============*/
 
-    function parsePaymasterAndData(bytes calldata paymasterAndData) public pure returns (GasPermit memory gasPermit) {
-        (address sponsor, uint256 nonce, uint48 validUntil, uint48 validAfter, bytes memory signature) =
-            abi.decode(paymasterAndData[20:], (address, uint256, uint48, uint48, bytes));
-        return GasPermit(sponsor, nonce, validUntil, validAfter, bytes32(0), signature);
+    // paymasterAndData is a bytes array with the first 20 bytes being this paymaster's address
+    // and the remaining data encoded in one of two ways:
+    // 1. sender == sponsor -> no further data needed, UserOp signature is implicit signature on payment
+    // 2. sender != sponsor -> sponsor has a nonce, valid time range, and signature
+    function parsePaymasterAndData(address sender, bytes calldata paymasterAndData)
+        public
+        pure
+        returns (GasPermit memory gasPermit)
+    {
+        address sponsor = paymasterAndData[20:40]; // first 20 bytes paymaster address, next 20 sponsor address
+        if (sender == sponsor) {
+            return GasPermit(sponsor, 0, 0, 0, bytes32(0), "");
+        }
+        return GasPermit(
+            sponsor,
+            paymasterAndData[40:72], // uint256 nonce
+            paymasterAndData[72:78], // uint48 validUntil
+            paymasterAndData[78:86], // uint48 validAfter
+            paymasterAndData[86:118], // bytes32 draftUserOpHash
+            paymasterAndData[118:] // bytes signature
+        );
     }
 
+    // forked from Pimlico's VerifyingPaymaster: https://optimistic.etherscan.io/address/0x4df91e173a6cdc74efef6fc72bb5df1e8a8d7582#code
     function _pack(UserOperation calldata userOp) internal pure returns (bytes memory ret) {
         bytes calldata pnd = userOp.paymasterAndData;
         // copy directly the userOp from calldata up to (but not including) the paymasterAndData.
