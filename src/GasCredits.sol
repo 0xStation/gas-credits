@@ -8,6 +8,7 @@ import {IEntryPoint} from "lib/account-abstraction/contracts/interfaces/IEntryPo
 import {UserOperation} from "lib/account-abstraction/contracts/interfaces/UserOperation.sol";
 import "lib/account-abstraction/contracts/core/Helpers.sol";
 import {NonceBitMap} from "./utils/NonceBitMap.sol";
+import {console2} from "forge-std/console2.sol";
 
 contract GasCredits is ERC20, NonceBitMap, IPaymaster {
     error SenderNotEntrypoint();
@@ -52,9 +53,9 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         external
         returns (bytes memory context, uint256 validationData)
     {
-        if (msg.sender != address(entryPoint)) SenderNotEntrypoint();
+        if (msg.sender != address(entryPoint)) revert SenderNotEntrypoint();
 
-        GasPermit memory permit = parsePaymasterAndData(userOp.paymasterAndData);
+        GasPermit memory permit = parsePaymasterAndData(userOp.sender, userOp.paymasterAndData);
         if (balanceOf(permit.sponsor) < maxCost + GAS_OVERHEAD * userOp.maxFeePerGas) {
             revert InsufficientGasCredits();
         }
@@ -73,7 +74,7 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
 
     // burn $GAS that was consumed by this UserOp
     function postOp(PostOpMode, bytes calldata context, uint256 actualGasCost) external {
-        if (msg.sender != address(entryPoint)) SenderNotEntrypoint();
+        if (msg.sender != address(entryPoint)) revert SenderNotEntrypoint();
 
         address sponsor = abi.decode(context, (address));
         _burn(sponsor, actualGasCost + GAS_OVERHEAD * tx.gasprice);
@@ -121,16 +122,16 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         pure
         returns (GasPermit memory gasPermit)
     {
-        address sponsor = paymasterAndData[20:40]; // first 20 bytes paymaster address, next 20 sponsor address
+        address sponsor = address(bytes20(paymasterAndData[20:40])); // first 20 bytes paymaster address, next 20 sponsor address
         if (sender == sponsor) {
             return GasPermit(sponsor, 0, 0, 0, bytes32(0), "");
         }
         return GasPermit(
             sponsor,
-            paymasterAndData[40:72], // uint256 nonce
-            paymasterAndData[72:78], // uint48 validUntil
-            paymasterAndData[78:86], // uint48 validAfter
-            paymasterAndData[86:118], // bytes32 draftUserOpHash
+            uint256(bytes32(paymasterAndData[40:72])), // uint256 nonce
+            uint48(bytes6(paymasterAndData[72:78])), // uint48 validUntil
+            uint48(bytes6(paymasterAndData[78:86])), // uint48 validAfter
+            bytes32(paymasterAndData[86:118]), // bytes32 draftUserOpHash
             paymasterAndData[118:] // bytes signature
         );
     }
