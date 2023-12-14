@@ -4,6 +4,7 @@ pragma solidity ^0.8.13;
 import {Test, console2} from "forge-std/Test.sol";
 import {ECDSA} from "openzeppelin-contracts/utils/cryptography/ECDSA.sol";
 import {ERC1967Proxy} from "openzeppelin-contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {IStakeManager} from "account-abstraction/interfaces/IStakeManager.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {EntryPoint} from "account-abstraction/core/EntryPoint.sol";
 import {UserOperation} from "account-abstraction/interfaces/UserOperation.sol";
@@ -43,6 +44,8 @@ contract GasCreditsTest is Test {
     }
 
     function test_handleOps() public { 
+        vm.txGasPrice(3000000000);
+
         userOp = UserOperation({
             sender: address(userAccount),
             nonce: 0,
@@ -72,6 +75,8 @@ contract GasCreditsTest is Test {
     }
 
     function test_handleOpsPaymaster() public {
+        vm.txGasPrice(3000000000);
+
         // 21000 / batchSize + 4*zeroBytes + 16*nonZeroBytes + 25*userOpWords+22874
         uint256 _preVerificationGas = 21000 + 4 * 11 + 25 * 11 + 22874;
         // not using separate sponsor so permi hash and sig are unused
@@ -105,7 +110,60 @@ contract GasCreditsTest is Test {
         vm.prank(address(userAccount));
         gasCredits.mint{value: balance}();
 
-        // console2.logUint(entryPoint.getDepositInfo(address(gasCredits)).deposit);
         testEntryPoint.handleOps(userOps, payable(address(0x1)));
+    }
+
+    function test_handleOpsPaymasterPermit() public {
+        vm.txGasPrice(3000000000);
+
+        // 21000 / batchSize + 4*zeroBytes + 16*nonZeroBytes + 25*userOpWords+22874
+        uint256 _preVerificationGas = 21000 + 4 * 11 + 25 * 30 + 22874;
+        bytes memory mintData = abi.encodeWithSelector(GasCredits.mint.selector);
+        userOp = UserOperation({
+            sender: address(userAccount),
+            nonce: 0,
+            initCode: '',
+            callData: abi.encodeWithSelector(SimpleAccount.execute.selector, address(gasCredits), 1, mintData),
+            callGasLimit: 100_000,
+            verificationGasLimit: 100_000,
+            preVerificationGas: _preVerificationGas,
+            maxFeePerGas: 1_000_000_000, //1gwei
+            maxPriorityFeePerGas: 1,
+            paymasterAndData: '',
+            signature: ""
+        });
+
+        GasCredits.GasPermit memory permit = GasCredits.GasPermit({
+            sponsor: address(gasCredits),
+            nonce: 0,
+            validUntil: uint48(0),
+            validAfter: uint48(0),
+            draftUserOpHash: gasCredits.getDraftUserOpHash(userOp),
+            signature: ''
+        });
+
+        bytes32 permitHash = gasCredits.getPermitHash(permit);
+        bytes32 ethSignPermitHash = ECDSA.toEthSignedMessageHash(permitHash);
+        (uint8 vp, bytes32 rp, bytes32 sp) = vm.sign(userPrivateKey, ethSignPermitHash);
+        bytes memory permitSig = abi.encodePacked(rp, sp, vp);
+        permit.signature = permitSig;
+
+        userOp.paymasterAndData = abi.encodePacked(address(gasCredits), address(userAccount), userOp.nonce, uint48(0), uint48(0), permitHash, permitSig);
+        bytes32 userOpHash = testEntryPoint.getUserOpHash(userOp);
+        bytes32 ethSignUserOpHash = ECDSA.toEthSignedMessageHash(userOpHash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPrivateKey, ethSignUserOpHash);
+        bytes memory sig = abi.encodePacked(r, s, v);
+        userOp.signature = sig;
+        
+        UserOperation[] memory userOps = new UserOperation[](1);
+        userOps[0] = userOp;
+
+        uint256 balance = 1_000_000_000_000_000_000_000_000;
+        vm.deal(address(userAccount), balance);
+        vm.prank(address(userAccount));
+        gasCredits.mint{value: balance - 1}();
+
+        testEntryPoint.handleOps(userOps, payable(address(0x1)));
+        assertEq(IStakeManager(address(testEntryPoint)).getDepositInfo(address(gasCredits)).deposit, gasCredits.balanceOf(address(userAccount)));
     }
 }
