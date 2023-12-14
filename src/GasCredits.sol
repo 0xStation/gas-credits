@@ -16,7 +16,7 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
 
     // 4337
     IEntryPoint public immutable entryPoint;
-    uint256 private immutable GAS_OVERHEAD = 69420;
+    uint256 private immutable GAS_OVERHEAD = 8000;
     // signatures
     bytes32 private constant GAS_PERMIT_TYPE_HASH = keccak256(
         "GasPermit(address sponsor,uint256 nonce,uint48 validUntil,uint48 validAfter,bytes32 draftUserOpHash)"
@@ -77,12 +77,34 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         if (msg.sender != address(entryPoint)) revert SenderNotEntrypoint();
 
         address sponsor = abi.decode(context, (address));
-        _burn(sponsor, actualGasCost + GAS_OVERHEAD * tx.gasprice);
+        _burn(sponsor, (actualGasCost + GAS_OVERHEAD) * tx.gasprice);
     }
 
     /*================
         SIGNATURES
     ================*/
+
+    function getPermitHash(GasPermit calldata permit) public view returns (bytes32 permitHash) {
+        // hash permit values
+        bytes32 valuesHash = keccak256(
+            abi.encode(
+                GAS_PERMIT_TYPE_HASH,
+                permit.validUntil,
+                permit.validAfter,
+                permit.sponsor,
+                permit.nonce,
+                permit.draftUserOpHash
+            )
+        );
+        // hash domain with permit values
+        permitHash = ECDSA.toTypedDataHash(
+            INITIAL_CHAIN_ID == block.chainid ? INITIAL_DOMAIN_SEPARATOR : _domainSeparator(), valuesHash
+        );
+    }
+
+    function getDraftUserOpHash(UserOperation calldata userOp) public view returns (bytes32 draftUserOpHash) {
+        return keccak256(_pack(userOp));
+    }
 
     /// @notice Verify the signer, signature, and data align and revert otherwise
     function _verifyPermit(GasPermit memory permit) private view returns (bool sigFailed) {
