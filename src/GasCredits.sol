@@ -12,22 +12,29 @@ import {NonceBitMap} from "./utils/NonceBitMap.sol";
 contract GasCredits is ERC20, NonceBitMap, IPaymaster {
     error SenderNotEntrypoint();
     error InsufficientGasCredits();
+    error InsufficientDelegation();
 
     // 4337
     IEntryPoint public immutable entryPoint;
     uint256 private immutable GAS_OVERHEAD = 69420;
     // signatures
     bytes32 private constant GAS_PERMIT_TYPE_HASH = keccak256(
-        "GasPermit(address sponsor,uint256 nonce,uint48 validUntil,uint48 validAfter,bytes32 draftUserOpHash)"
+        "GasPermit(address sponsor,address signer,uint256 nonce,uint48 validUntil,uint48 validAfter,bytes32 draftUserOpHash)"
     );
     bytes32 private constant DOMAIN_TYPE_HASH =
         keccak256("EIP712Domain(string name,uint256 chainId,address verifyingContract)");
-    bytes32 private constant NAME_HASH = keccak256("Gas Credits");
+    bytes32 private constant NAME_HASH = keccak256("GasCredits");
     bytes32 internal immutable INITIAL_DOMAIN_SEPARATOR;
     uint256 internal immutable INITIAL_CHAIN_ID;
 
+    // sponsor -> delegate -> value
+    mapping(address => mapping(address => uint256)) public _delegations;
+
+    event Delegate(address indexed sponsor, address indexed delegate, uint256 value);
+
     struct GasPermit {
         address sponsor;
+        address signer;
         uint256 nonce;
         uint48 validUntil;
         uint48 validAfter;
@@ -47,36 +54,67 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         _mint(_msgSender(), msg.value);
     }
 
+    // mint $GAS to another address by depositing ETH 1:1
+    function mintTo(address recipient) public payable {
+        entryPoint.depositTo{value: msg.value}(address(this));
+        _mint(recipient, msg.value);
+    }
+
     // validate sponsors have sufficient $GAS and valid signatures
     function validatePaymasterUserOp(UserOperation calldata userOp, bytes32, uint256 maxCost)
         external
         returns (bytes memory context, uint256 validationData)
     {
-        if (msg.sender != address(entryPoint)) SenderNotEntrypoint();
+        if (msg.sender != address(entryPoint)) revert SenderNotEntrypoint();
 
-        GasPermit memory permit = parsePaymasterAndData(userOp.paymasterAndData);
-        if (balanceOf(permit.sponsor) < maxCost + GAS_OVERHEAD * userOp.maxFeePerGas) {
-            revert InsufficientGasCredits();
-        }
-        bool sigFailed;
-        if (permit.sponsor != userOp.sender) {
+        // only 20 bytes for paymaster address, implicit auth that sender is sponsor
+        if (userOp.paymasterAndData.length == 20) {
+            // validate sender has enough $GAS balance to cover userOp
+            if (balanceOf(userOp.sender) < maxCost + GAS_OVERHEAD * userOp.maxFeePerGas) {
+                revert InsufficientGasCredits();
+            }
+            // return sender, not sigFailed, null validUntil, null validAfter
+            return (abi.encode(userOp.sender), _packValidationData(false, 0, 0));
+        } else {
+            // parse paymaster data for permit for sponsorship
+            GasPermit memory permit = parsePaymasterAndData(userOp.paymasterAndData);
+            if (balanceOf(permit.sponsor) < maxCost + GAS_OVERHEAD * userOp.maxFeePerGas) {
+                revert InsufficientGasCredits();
+            }
             // use nonce, reverts if already used
-            _useNonce(permit.sponsor, permit.nonce);
+            _useNonce(permit.signer, permit.nonce);
             // compress userOp into hash with empty paymaster data and signature
             permit.draftUserOpHash = keccak256(_pack(userOp));
             // verify permit signature
-            sigFailed = _verifyPermit(permit);
+            bool sigFailed = _verifyPermit(permit);
+            if (permit.sponsor != permit.signer) {
+                if (_delegations[permit.sponsor][permit.signer] < maxCost + GAS_OVERHEAD * userOp.maxFeePerGas) {
+                    revert InsufficientDelegation();
+                }
+            }
+            return (abi.encode(permit.sponsor), _packValidationData(sigFailed, permit.validUntil, permit.validAfter));
         }
-
-        return (abi.encode(permit.sponsor), _packValidationData(sigFailed, permit.validUntil, permit.validAfter));
     }
 
     // burn $GAS that was consumed by this UserOp
     function postOp(PostOpMode, bytes calldata context, uint256 actualGasCost) external {
-        if (msg.sender != address(entryPoint)) SenderNotEntrypoint();
+        if (msg.sender != address(entryPoint)) revert SenderNotEntrypoint();
 
         address sponsor = abi.decode(context, (address));
         _burn(sponsor, actualGasCost + GAS_OVERHEAD * tx.gasprice);
+    }
+
+    /*==============
+        DELEGATE
+    ==============*/
+
+    function delegate(address to, uint256 value) external {
+        _delegations[msg.sender][to] = value;
+        emit Delegate(msg.sender, to, value);
+    }
+
+    function delegation(address from, address to) external view returns (uint256 value) {
+        return _delegations[from][to];
     }
 
     /*================
@@ -92,6 +130,7 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
                 permit.validUntil,
                 permit.validAfter,
                 permit.sponsor,
+                permit.signer,
                 permit.nonce,
                 permit.draftUserOpHash
             )
@@ -101,7 +140,7 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
             INITIAL_CHAIN_ID == block.chainid ? INITIAL_DOMAIN_SEPARATOR : _domainSeparator(), valuesHash
         );
         // return if permit is valid
-        return SignatureChecker.isValidSignatureNow(permit.sponsor, permitHash, permit.signature);
+        return SignatureChecker.isValidSignatureNow(permit.signer, permitHash, permit.signature);
     }
 
     function _domainSeparator() private view returns (bytes32) {
@@ -116,22 +155,16 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
     // and the remaining data encoded in one of two ways:
     // 1. sender == sponsor -> no further data needed, UserOp signature is implicit signature on payment
     // 2. sender != sponsor -> sponsor has a nonce, valid time range, and signature
-    function parsePaymasterAndData(address sender, bytes calldata paymasterAndData)
-        public
-        pure
-        returns (GasPermit memory gasPermit)
-    {
-        address sponsor = paymasterAndData[20:40]; // first 20 bytes paymaster address, next 20 sponsor address
-        if (sender == sponsor) {
-            return GasPermit(sponsor, 0, 0, 0, bytes32(0), "");
-        }
+    // 3. sender != sponsor && sponsor != signer -> signer has a nonce, valid time range, and signature
+    function parsePaymasterAndData(bytes calldata paymasterAndData) public pure returns (GasPermit memory gasPermit) {
         return GasPermit(
-            sponsor,
-            paymasterAndData[40:72], // uint256 nonce
-            paymasterAndData[72:78], // uint48 validUntil
-            paymasterAndData[78:86], // uint48 validAfter
-            paymasterAndData[86:118], // bytes32 draftUserOpHash
-            paymasterAndData[118:] // bytes signature
+            address(bytes20(paymasterAndData[20:40])), // address sponsor
+            address(bytes20(paymasterAndData[40:60])), // address signer
+            uint256(bytes32(paymasterAndData[60:92])), // uint256 nonce
+            uint48(bytes6(paymasterAndData[92:98])), // uint48 validUntil
+            uint48(bytes6(paymasterAndData[98:104])), // uint48 validAfter
+            bytes32(paymasterAndData[104:136]), // bytes32 draftUserOpHash
+            paymasterAndData[136:] // bytes signature
         );
     }
 
