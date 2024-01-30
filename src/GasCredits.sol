@@ -48,14 +48,21 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         INITIAL_CHAIN_ID = block.chainid;
     }
 
+    // redeem $GAS for ETH, only used for ease of testing
+    function redeem() external {
+        uint256 balance = balanceOf(msg.sender);
+        _burn(msg.sender, balance);
+        entryPoint.withdrawTo(payable(msg.sender), balance);
+    }
+
     // mint $GAS by depositing ETH 1:1
-    function mint() public payable {
+    function mint() external payable {
         entryPoint.depositTo{value: msg.value}(address(this));
         _mint(_msgSender(), msg.value);
     }
 
     // mint $GAS to another address by depositing ETH 1:1
-    function mintTo(address recipient) public payable {
+    function mintTo(address recipient) external payable {
         entryPoint.depositTo{value: msg.value}(address(this));
         _mint(recipient, msg.value);
     }
@@ -163,8 +170,8 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
             uint256(bytes32(paymasterAndData[60:92])), // uint256 nonce
             uint48(bytes6(paymasterAndData[92:98])), // uint48 validUntil
             uint48(bytes6(paymasterAndData[98:104])), // uint48 validAfter
-            bytes32(paymasterAndData[104:136]), // bytes32 draftUserOpHash
-            paymasterAndData[136:] // bytes signature
+            bytes32(0), // empty draftUserOpHash
+            paymasterAndData[104:] // bytes signature
         );
     }
 
