@@ -23,7 +23,7 @@ contract GasToken is ERC20, NonceBitMap, IPaymaster {
     bytes32 private immutable INITIAL_DOMAIN_SEPARATOR;
     uint256 private immutable INITIAL_CHAIN_ID;
 
-    uint256 private constant GAS_OVERHEAD = 14118;
+    uint256 private constant POST_OP_OVERHEAD = 14118;
     IEntryPoint public immutable entryPoint;
 
     mapping(address sponsor => mapping(address delegate => bool delegated)) private _delegations;
@@ -53,14 +53,6 @@ contract GasToken is ERC20, NonceBitMap, IPaymaster {
         INITIAL_CHAIN_ID = block.chainid;
     }
 
-    /// @notice Redeem full GAS balance for ETH deposit
-    /// @dev MUST REMOVE PRE-DEPLOYMENT, only used for ease of testing
-    function redeem() external {
-        uint256 balance = balanceOf(msg.sender);
-        _burn(msg.sender, balance);
-        entryPoint.withdrawTo(payable(msg.sender), balance);
-    }
-
     /// @notice Mint GAS by depositing ETH 1:1
     function mint() external payable {
         entryPoint.depositTo{value: msg.value}(address(this));
@@ -85,16 +77,16 @@ contract GasToken is ERC20, NonceBitMap, IPaymaster {
 
         // only 20 bytes for paymaster address, implicit auth that sender is sponsor
         if (userOp.paymasterAndData.length == 20) {
-            // validate sender has enough $GAS balance to cover userOp
-            if (balanceOf(userOp.sender) < maxCost + GAS_OVERHEAD * userOp.maxFeePerGas) {
+            // validate sender has enough GAS balance to cover userOp
+            if (balanceOf(userOp.sender) < maxCost + POST_OP_OVERHEAD * userOp.maxFeePerGas) {
                 revert InsufficientGasToken();
             }
             // return sender, not sigFailed, null validUntil, null validAfter
-            return (abi.encode(userOp.sender, userOp.sender), _packValidationData(false, 0, 0));
+            return (abi.encode(userOp.sender), _packValidationData(false, 0, 0));
         } else {
             // parse paymaster data for permit for sponsorship
             GasPermit memory permit = parsePaymasterAndData(userOp.paymasterAndData);
-            if (balanceOf(permit.sponsor) < maxCost + GAS_OVERHEAD * userOp.maxFeePerGas) {
+            if (balanceOf(permit.sponsor) < maxCost + POST_OP_OVERHEAD * userOp.maxFeePerGas) {
                 revert InsufficientGasToken();
             }
             // use nonce, reverts if already used
@@ -106,30 +98,18 @@ contract GasToken is ERC20, NonceBitMap, IPaymaster {
             if (permit.sponsor != permit.signer && !isDelegated(permit.sponsor, permit.signer)) {
                 revert InvalidDelegation();
             }
-            return (
-                abi.encode(permit.sponsor, permit.signer),
-                _packValidationData(sigFailed, permit.validUntil, permit.validAfter)
-            );
+            return (abi.encode(permit.sponsor), _packValidationData(sigFailed, permit.validUntil, permit.validAfter));
         }
     }
 
     /// @notice Burn GAS that was consumed by a user operation
-    /// @param context ABI encoding of sponsor and signer address
+    /// @param context ABI encoding of sponsor address
     /// @param actualGasCost Amount of gas (lower-case) that was consumed by the user operation
     function postOp(PostOpMode, bytes calldata context, uint256 actualGasCost) external {
         if (msg.sender != address(entryPoint)) revert SenderNotEntrypoint();
 
-        (address sponsor, address signer) = abi.decode(context, (address, address));
-        // burn GAS
-        uint256 consumedTokens = actualGasCost + GAS_OVERHEAD * tx.gasprice;
-        _burn(sponsor, consumedTokens);
-        // reduce delegation amount
-        if (sponsor != signer) {
-            uint256 delegation = _delegations[sponsor][signer];
-            if (delegation != 2 ** 256 - 1) {
-                _delegations[sponsor][signer] = delegation - consumedTokens;
-            }
-        }
+        address sponsor = abi.decode(context, (address));
+        _burn(sponsor, actualGasCost + POST_OP_OVERHEAD * tx.gasprice);
     }
 
     /*==============
