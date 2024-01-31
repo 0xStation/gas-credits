@@ -52,7 +52,47 @@ their subsidization rewards wherever they go and with any account they choose.
 ### Spend $GAS -- User sponsored by a third party (eg dApp)
 
 To serve gas policy automation needs for dApps and wallet providers, $GAS includes a sponsor and delegation mechanism. Sponsors will have their $GAS burned
-to cover bundler fees and entrust delegates to run gas policies for them. ERC-1271 compatible smart contract accounts are recommended for delegates to enable safe key rotation
-and other security precautions. Investigation into a standard RPC set for creating and querying gas policies is of high interest to further interoperability for the ERC-4337 ecosystem.
+to cover bundler fees and entrust delegates to run gas policies for them. For example, a dApp would hold 1 GAS in a Safe and delegate to Station to run a gas policy of 1 sponsored user operation per user per day. Station's wallet and any wallets that want to leverage Station's gas policy network query for sponsorship before submitting a user operation, receive a "Gas Permit", and submit the user operation with this sponsorship approval.
+
+Note: ERC-1271 compatible smart contract accounts are recommended for delegates to enable safe key rotation and other security precautions. Investigation into a standard RPC set for creating and querying gas policies is of high interest to further interoperability for the ERC-4337 ecosystem.
 
 <img width="1179" alt="image" src="https://github.com/0xStation/gas-token/assets/38736612/8f50854e-27b1-425d-83ba-5e126774d60a">
+
+
+## Signature Schema
+
+The signature schema for Gas Permits follows [EIP-712](https://eips.ethereum.org/EIPS/eip-712).
+
+Domain:
+```solidity
+EIP712Domain(
+  string name, // "GasToken"
+  uint256 chainId,
+  address verifyingContract, // GasToken contract, permissionless singleton with same address on all networks
+)
+```
+
+Types:
+```solidity
+GasPermit(
+  address sponsor, // entity who pays for the user op and has GAS balance deducted
+  address signer, // either the sponsor, or a delegate of the sponsor
+  uint256 nonce, // nonce for the signer, separate from the user operation's nonce and stored in GasToken for replay protection
+  uint48 validUntil, // when this permit expires
+  uint48 validAfter, // when this permit becomes active
+  bytes32 draftUserOpHash, // hash of user operation with pruned paymasterAndData and signature fields
+)
+```
+
+The derivation of this schema came about from reading existing paymaster implementations from Pimlico and Alchemy. While the signatures on those paymasters have less fields than here,
+the same components are at play: the `sponsor` is analogous to the paymaster address, `signer` analogous to a signer (typically one) that each paymaster trusts, `nonce` analogous to some other custom nonce system for replay protection. The other parameters for `valid*` and a hashed subset of the user operation are consistently present in other signature-based paymasters. The GasToken paymaster essentially turns every GAS holder into a sponsor and enables them to choose their own signers for automating subsidization, unbundling the same components for maximum flexibility and interoperability.
+
+## Contract Deployment
+
+The GasToken contract is an ownerless, permissionless contract meant to be a singleton per-chain. Having a canonical address across all environments will help keep developer friction to a minimum and reduce risk of potential scammers posing as alternative options. Deploying through the [Deterministic Deployment Proxy](https://github.com/Arachnid/deterministic-deployment-proxy) with first-class support from Foundry will enable permissionless deployment of the contract on any EVM chain. When the time to deploy an official v1 comes, a pre-mine will also be done to optimize the address with enough leading zeros to bring additional gas savings. Official v1 deployment is phased for the end of February, after the new EntryPoint implementation is finalized and hopefully before ETH Denver 2024.
+
+## Collaborating
+
+GasToken is open to all input from the community. Specific engineering goals and needs will be advertised in the Issues of this repository.
+
+We are particularly interested in collaborating with L2s to create the first protocol-wide gas incentive programs with this system. Additionally, we would like to help any and all bundlers and wallet providers integrate with the contract.
