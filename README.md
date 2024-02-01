@@ -29,7 +29,7 @@ This ETH is then atomically deposited into ERC-4337's EntryPoint, enabling the c
 and there is no way to unwrap credits other than when payment is made to the bundler when processing a user operation. Additionally a `mintTo(address recipient)`
 exists for conveniently depositing newly minted credits in an external address like a Safe.
 
-<img width="1220" alt="image" src="https://github.com/0xStation/gas-credit/assets/38736612/dcf74cc5-85c5-4d17-8bbc-bd5b90269690">
+<img width="1220" alt="image" src="https://github.com/0xStation/gas-credits/assets/38736612/dcf74cc5-85c5-4d17-8bbc-bd5b90269690">
 
 ### Distribute $GAS 
 
@@ -47,7 +47,7 @@ The simplest way to spend $GAS is to hold it in an ERC-4337 smart contract accou
 is the native authentication needed to burn the needed $GAS from their balance to pay the bundler. Users are free to transfer $GAS across their accounts and take
 their subsidization rewards wherever they go and with any account they choose.
 
-<img width="1093" alt="image" src="https://github.com/0xStation/gas-credit/assets/38736612/a833185c-5851-4cc7-8c53-a3c1dcd065e0">
+<img width="1093" alt="image" src="https://github.com/0xStation/gas-credits/assets/38736612/a833185c-5851-4cc7-8c53-a3c1dcd065e0">
 
 ### Spend $GAS -- User sponsored by a third party (eg dApp)
 
@@ -56,7 +56,7 @@ to cover bundler fees and entrust delegates to run gas policies for them. For ex
 
 Note: ERC-1271 compatible smart contract accounts are recommended for delegates to enable safe key rotation and other security precautions. Investigation into a standard RPC set for creating and querying gas policies is of high interest to further interoperability for the ERC-4337 ecosystem.
 
-<img width="1179" alt="image" src="https://github.com/0xStation/gas-credit/assets/38736612/8f50854e-27b1-425d-83ba-5e126774d60a">
+<img width="1179" alt="image" src="https://github.com/0xStation/gas-credits/assets/38736612/8f50854e-27b1-425d-83ba-5e126774d60a">
 
 
 ## Signature Schema
