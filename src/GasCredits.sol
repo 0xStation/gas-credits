@@ -9,27 +9,27 @@ import {UserOperation} from "lib/account-abstraction/contracts/interfaces/UserOp
 import "lib/account-abstraction/contracts/core/Helpers.sol";
 import {NonceBitMap} from "./utils/NonceBitMap.sol";
 
-/// @title GasToken
+/// @title GasCredits
 /// @notice Tokenized gas for the ERC-4337 ecosystem.
 /// @author Conner (@ilikesymmetry)
 /// @author Station (@0xstation)
-contract GasToken is ERC20, NonceBitMap, IPaymaster {
+contract GasCredits is ERC20, NonceBitMap, IPaymaster {
     bytes32 private constant GAS_PERMIT_TYPE_HASH = keccak256(
         "GasPermit(address sponsor,address signer,uint256 nonce,uint48 validUntil,uint48 validAfter,bytes32 draftUserOpHash)"
     );
     bytes32 private constant DOMAIN_TYPE_HASH =
         keccak256("EIP712Domain(string name,uint256 chainId,address verifyingContract)");
-    bytes32 private constant NAME_HASH = keccak256("GasToken");
+    bytes32 private constant NAME_HASH = keccak256("GasCredits");
     bytes32 private immutable INITIAL_DOMAIN_SEPARATOR;
     uint256 private immutable INITIAL_CHAIN_ID;
 
-    uint256 private constant POST_OP_OVERHEAD = 14118;
+    uint256 private constant VERIFICATION_OVERHEAD = 14600;
     IEntryPoint public immutable entryPoint;
 
     mapping(address sponsor => mapping(address delegate => bool delegated)) private _delegations;
 
     error SenderNotEntrypoint();
-    error InsufficientGasToken();
+    error InsufficientGasCredits();
     error InvalidDelegation();
 
     event Delegate(address indexed sponsor, address indexed delegate);
@@ -47,7 +47,7 @@ contract GasToken is ERC20, NonceBitMap, IPaymaster {
 
     /// @notice Constructor
     /// @param _entryPoint Address of the Entrypoint
-    constructor(IEntryPoint _entryPoint) ERC20("Gas Token", "GAS") {
+    constructor(IEntryPoint _entryPoint) ERC20("Gas Credits", "GAS") {
         entryPoint = _entryPoint;
         INITIAL_DOMAIN_SEPARATOR = _domainSeparator();
         INITIAL_CHAIN_ID = block.chainid;
@@ -78,16 +78,16 @@ contract GasToken is ERC20, NonceBitMap, IPaymaster {
         // only 20 bytes for paymaster address, implicit auth that sender is sponsor
         if (userOp.paymasterAndData.length == 20) {
             // validate sender has enough GAS balance to cover userOp
-            if (balanceOf(userOp.sender) < maxCost + POST_OP_OVERHEAD * userOp.maxFeePerGas) {
-                revert InsufficientGasToken();
+            if (balanceOf(userOp.sender) < maxCost + VERIFICATION_OVERHEAD * userOp.maxFeePerGas) {
+                revert InsufficientGasCredits();
             }
             // return sender, not sigFailed, null validUntil, null validAfter
             return (abi.encode(userOp.sender), _packValidationData(false, 0, 0));
         } else {
             // parse paymaster data for permit for sponsorship
             GasPermit memory permit = parsePaymasterAndData(userOp.paymasterAndData);
-            if (balanceOf(permit.sponsor) < maxCost + POST_OP_OVERHEAD * userOp.maxFeePerGas) {
-                revert InsufficientGasToken();
+            if (balanceOf(permit.sponsor) < maxCost + VERIFICATION_OVERHEAD * userOp.maxFeePerGas) {
+                revert InsufficientGasCredits();
             }
             // use nonce, reverts if already used
             _useNonce(permit.signer, permit.nonce);
@@ -109,7 +109,7 @@ contract GasToken is ERC20, NonceBitMap, IPaymaster {
         if (msg.sender != address(entryPoint)) revert SenderNotEntrypoint();
 
         address sponsor = abi.decode(context, (address));
-        _burn(sponsor, actualGasCost + POST_OP_OVERHEAD * tx.gasprice);
+        _burn(sponsor, actualGasCost + VERIFICATION_OVERHEAD * tx.gasprice);
     }
 
     /*==============
