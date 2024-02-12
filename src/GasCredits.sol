@@ -53,6 +53,14 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         INITIAL_CHAIN_ID = block.chainid;
     }
 
+    /// @notice ONLY FOR TESTING - redeem balance back to ETH
+    /// @dev Locking constraint lifted while in development for easily reusing testnet ETH on new contracts
+    function redeem() external {
+        uint256 balance = balanceOf(msg.sender);
+        entryPoint.withdrawTo(msg.sender, balance);
+        _burn(msg.sender, balance);
+    }
+
     /// @notice Mint GAS by depositing ETH 1:1
     function mint() external payable {
         entryPoint.depositTo{value: msg.value}(address(this));
