@@ -56,7 +56,7 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
     /// @notice Mint GAS by depositing ETH 1:1
     function mint() external payable {
         entryPoint.depositTo{value: msg.value}(address(this));
-        _mint(_msgSender(), msg.value);
+        _mint(msg.sender, msg.value);
     }
 
     /// @notice Mint GAS to another address by depositing ETH 1:1
@@ -78,17 +78,13 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         // only 20 bytes for paymaster address, implicit auth that sender is sponsor
         if (userOp.paymasterAndData.length == 20) {
             // validate sender has enough GAS balance to cover userOp
-            if (balanceOf(userOp.sender) < maxCost + VERIFICATION_OVERHEAD * userOp.maxFeePerGas) {
-                revert InsufficientGasCredits();
-            }
+            _validateSponsorBalance(userOp.sender, maxCost, userOp.maxFeePerGas);
             // return sender, not sigFailed, null validUntil, null validAfter
             return (abi.encode(userOp.sender), _packValidationData(false, 0, 0));
         } else {
             // parse paymaster data for permit for sponsorship
             GasPermit memory permit = parsePaymasterAndData(userOp.paymasterAndData);
-            if (balanceOf(permit.sponsor) < maxCost + VERIFICATION_OVERHEAD * userOp.maxFeePerGas) {
-                revert InsufficientGasCredits();
-            }
+            _validateSponsorBalance(permit.sponsor, maxCost, userOp.maxFeePerGas);
             // use nonce, reverts if already used
             _useNonce(permit.signer, permit.nonce);
             // compress userOp into hash with empty paymaster data and signature
@@ -99,6 +95,16 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
                 revert InvalidDelegation();
             }
             return (abi.encode(permit.sponsor), _packValidationData(sigFailed, permit.validUntil, permit.validAfter));
+        }
+    }
+
+    /// @notice Validate sponsor has enough GAS
+    /// @param sponsor Address of the sponsoring entity
+    /// @param maxCost Amount of maximum gas (lower-case) to be consumed by the user operation
+    /// @param maxFeePerGas Maximum fee (ETH) per unit gas
+    function _validateSponsorBalance(address sponsor, uint256 maxCost, uint256 maxFeePerGas) internal {
+        if (balanceOf(sponsor) < (maxCost + VERIFICATION_OVERHEAD) * maxFeePerGas) {
+            revert InsufficientGasCredits();
         }
     }
 
@@ -163,8 +169,8 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         bytes32 permitHash = ECDSA.toTypedDataHash(
             INITIAL_CHAIN_ID == block.chainid ? INITIAL_DOMAIN_SEPARATOR : _domainSeparator(), valuesHash
         );
-        // return if permit is valid
-        return SignatureChecker.isValidSignatureNow(permit.signer, permitHash, permit.signature);
+        // return if signature failed = permit is NOT valid
+        sigFailed = !SignatureChecker.isValidSignatureNow(permit.signer, permitHash, permit.signature);
     }
 
     /// @notice EIP712 domain separator for GasPermit verification
