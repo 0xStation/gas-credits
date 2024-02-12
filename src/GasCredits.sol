@@ -57,7 +57,7 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
     /// @dev Locking constraint lifted while in development for easily reusing testnet ETH on new contracts
     function redeem() external {
         uint256 balance = balanceOf(msg.sender);
-        entryPoint.withdrawTo(msg.sender, balance);
+        entryPoint.withdrawTo(payable(msg.sender), balance);
         _burn(msg.sender, balance);
     }
 
@@ -106,16 +106,6 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         }
     }
 
-    /// @notice Validate sponsor has enough GAS
-    /// @param sponsor Address of the sponsoring entity
-    /// @param maxCost Amount of maximum gas (lower-case) to be consumed by the user operation
-    /// @param maxFeePerGas Maximum fee (ETH) per unit gas
-    function _validateSponsorBalance(address sponsor, uint256 maxCost, uint256 maxFeePerGas) internal {
-        if (balanceOf(sponsor) < (maxCost + VERIFICATION_OVERHEAD) * maxFeePerGas) {
-            revert InsufficientGasCredits();
-        }
-    }
-
     /// @notice Burn GAS that was consumed by a user operation
     /// @param context ABI encoding of sponsor address
     /// @param actualGasCost Amount of gas (lower-case) that was consumed by the user operation
@@ -124,6 +114,26 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
 
         address sponsor = abi.decode(context, (address));
         _burn(sponsor, actualGasCost + VERIFICATION_OVERHEAD * tx.gasprice);
+    }
+
+    /*=============
+        BALANCE
+    =============*/
+
+    /// @notice Decimals override for ERC20 balance cosmetics
+    /// @dev 12 was chosen so transaction fee values on popular L2s are easily read (order of 0.1-100s)
+    function decimals() public pure override returns (uint8) {
+        return 12; // 1 ETH = 1_000_000 GAS
+    }
+
+    /// @notice Validate sponsor has enough GAS
+    /// @param sponsor Address of the sponsoring entity
+    /// @param maxCost Amount of maximum gas (lower-case) to be consumed by the user operation
+    /// @param maxFeePerGas Maximum fee (ETH) per unit gas
+    function _validateSponsorBalance(address sponsor, uint256 maxCost, uint256 maxFeePerGas) internal view {
+        if (balanceOf(sponsor) < (maxCost + VERIFICATION_OVERHEAD) * maxFeePerGas) {
+            revert InsufficientGasCredits();
+        }
     }
 
     /*==============
