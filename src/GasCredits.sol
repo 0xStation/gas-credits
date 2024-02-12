@@ -131,7 +131,7 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
     /// @param maxCost Amount of maximum gas (lower-case) to be consumed by the user operation
     /// @param maxFeePerGas Maximum fee (ETH) per unit gas
     function _validateSponsorBalance(address sponsor, uint256 maxCost, uint256 maxFeePerGas) internal view {
-        if (balanceOf(sponsor) < (maxCost + VERIFICATION_OVERHEAD) * maxFeePerGas) {
+        if (balanceOf(sponsor) < maxCost + (maxFeePerGas * VERIFICATION_OVERHEAD)) {
             revert InsufficientGasCredits();
         }
     }
