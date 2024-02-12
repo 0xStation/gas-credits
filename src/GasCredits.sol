@@ -15,7 +15,7 @@ import {NonceBitMap} from "./utils/NonceBitMap.sol";
 /// @author Station (@0xstation)
 contract GasCredits is ERC20, NonceBitMap, IPaymaster {
     bytes32 private constant GAS_PERMIT_TYPE_HASH = keccak256(
-        "GasPermit(address sponsor,address signer,uint256 nonce,uint48 validUntil,uint48 validAfter,bytes32 draftUserOpHash)"
+        "GasPermit(address sponsor,address signer,uint256 nonce,uint48 validAfter,uint48 validUntil,bytes32 draftUserOpHash)"
     );
     bytes32 private constant DOMAIN_TYPE_HASH =
         keccak256("EIP712Domain(string name,uint256 chainId,address verifyingContract)");
@@ -39,8 +39,8 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         address sponsor;
         address signer;
         uint256 nonce;
-        uint48 validUntil;
         uint48 validAfter;
+        uint48 validUntil;
         bytes32 draftUserOpHash;
         bytes signature;
     }
@@ -175,11 +175,11 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
         bytes32 valuesHash = keccak256(
             abi.encode(
                 GAS_PERMIT_TYPE_HASH,
-                permit.validUntil,
-                permit.validAfter,
                 permit.sponsor,
                 permit.signer,
                 permit.nonce,
+                permit.validAfter,
+                permit.validUntil,
                 permit.draftUserOpHash
             )
         );
@@ -209,8 +209,8 @@ contract GasCredits is ERC20, NonceBitMap, IPaymaster {
             address(bytes20(paymasterAndData[20:40])), // address sponsor
             address(bytes20(paymasterAndData[40:60])), // address signer
             uint256(bytes32(paymasterAndData[60:92])), // uint256 nonce
-            uint48(bytes6(paymasterAndData[92:98])), // uint48 validUntil
-            uint48(bytes6(paymasterAndData[98:104])), // uint48 validAfter
+            uint48(bytes6(paymasterAndData[92:98])), // uint48 validAfter
+            uint48(bytes6(paymasterAndData[98:104])), // uint48 validUntil
             bytes32(0), // empty draftUserOpHash
             paymasterAndData[104:] // bytes signature
         );
